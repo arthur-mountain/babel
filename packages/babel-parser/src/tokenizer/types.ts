@@ -136,6 +136,13 @@ function createKeywordLike(
 
 export type InternalTokenTypes = typeof tt;
 
+// 註解：
+// 這邊會建立共用可重用的 Token，因為是固定語法符號的 token（像是 bracketL、comma、plus）
+// 這些 token type 是 固定且共用的，因為它們代表的是語言中固定的符號或關鍵字，不管出現多少次，token type 都是一樣的。
+// 雖然實際的每個 token instance（也就是一個字元或一串字元被解析成的「token」）會記錄其位置、文字值等不同的動態資訊，但它的類型（token type）是共用的。
+// 而動態資料(e.g 變數名稱、具體值等等) 會透過 tokenizer.finishToken 建立(包含更新 state 狀態機)
+// 註解：
+// createToken 會回傳 number(即 tokenTypeCounter 其實就是 index)
 export const tt = {
   // Punctuation token types.
   bracketL: createToken("[", { beforeExpr, startsExpr }),

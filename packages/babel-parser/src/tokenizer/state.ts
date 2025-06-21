@@ -28,6 +28,20 @@ export const enum LoopLabelKind {
   Switch = 2,
 }
 
+/**
+ * 操作層面：還是用很直覺的寫法：
+    state.strict = true;
+    console.log(state.async);
+    state.xxx = false;
+    每個屬性看起來都是獨立的 boolean 欄位，使用者（開發者）不需要知道底層怎麼實作。
+
+    底層實作： 底層其實是把所有這些 boolean 屬性壓縮存在 flags 這個數字欄位的不同 bit 位元中，這樣可以：
+      - 節省記憶體空間（尤其在很多 boolean 狀態的時候很有用）
+      - 加快存取效率
+
+    總結：
+      用起來就是平常操作物件屬性一樣，但底下是用 bit 操作在做優化。這就是這套 @bit decorator 的目的和好處。
+ */
 declare const bit: import("../../../../scripts/babel-plugin-bit-decorator/types.d.ts").BitDecorator<State>;
 
 export default class State {
