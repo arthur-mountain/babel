@@ -21,6 +21,19 @@ import { types as tc, type TokContext } from "./context.ts";
 // to know when parsing a label, in order to allow or disallow
 // continue jumps to that label.
 
+// ✅ 四種組合總表
+// 組合	startsExpr	beforeExpr	             說明	                             代表 token 範例
+// 1.	     ✅	        ✅	     可以當 expression 開頭，後面也能接 expression	     [, (, +, *
+// 2.  	   ✅	        ❌	     自己是 expression 開頭，但不預期後面還有 expression	name, number, string
+// 3.	     ❌	        ✅	     自己不是 expression，但提示後面是 expression	       =, +, return, :
+// 4. 	   ❌	        ❌	     不參與 expression，通常語句結尾或結束 token	        ), ;, }  
+// 🧠 小技巧：記憶思路
+// startsExpr：這個 token 可不可以當作「表達式開頭」？
+// beforeExpr：這個 token 是不是會「預期接一個表達式」？
+// ✅ 所以兩者合起來能描述一個完整的「語法過渡區段」：
+// beforeExpr 給 parser 用來切換狀態，
+// startsExpr 告訴 parser：「現在這個 token 能不能進入 parseExpression」
+
 const beforeExpr = true;
 const startsExpr = true;
 const isLoop = true;
