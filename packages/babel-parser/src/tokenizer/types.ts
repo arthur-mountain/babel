@@ -466,10 +466,20 @@ export function isTokenType(obj: any): boolean {
 }
 
 if (!process.env.BABEL_8_BREAKING) {
+  // 第 1 類：處理關閉大括號 `}` 的 context 結束
+  // 範例：
+  // function foo() {
+  //   return { a: 1 }; // 這裡的 `}` 會觸發 pop context
+  // }
   tokenTypes[tt.braceR].updateContext = context => {
     context.pop();
   };
 
+  // 第 2 類：處理各種類型的大括號開頭，例如 `{`、`#{`、`${`
+  // 進入新的 block、template 表達式時會觸發，push 一個 brace context
+  // 範例：
+  // if (x) { console.log(x); }  // braceL → push tc.brace
+  // const str = `Hi ${name}`    // dollarBraceL → push tc.brace
   tokenTypes[tt.braceL].updateContext =
     tokenTypes[tt.braceHashL].updateContext =
     tokenTypes[tt.dollarBraceL].updateContext =
@@ -477,6 +487,25 @@ if (!process.env.BABEL_8_BREAKING) {
         context.push(tc.brace);
       };
 
+  // 第 3 類：處理 template literal 的開頭與結尾 (backtick `)
+  // 進入 template → push tc.template，離開 template → pop tc.template
+  // 範例：
+  //
+  // const name = "Arthur";
+  // const greet = `Hello ${`nested ${name}`}`;
+  //                ↑             ↑
+  //         第一次 backQuote    第二次 backQuote (nested template)
+  //
+  // 對應行為：
+  // 第一次 `  → push tc.template
+  // `${        → push tc.brace
+  // 第二次 `  → push tc.template（nested template）
+  // `${        → push tc.brace
+  // name       → token
+  // `          → pop tc.template
+  // }          → pop tc.brace
+  // `          → pop tc.template
+  // }          → pop tc.brace
   tokenTypes[tt.backQuote].updateContext = context => {
     if (context[context.length - 1] === tc.template) {
       context.pop();
@@ -485,6 +514,14 @@ if (!process.env.BABEL_8_BREAKING) {
     }
   };
 
+  // 第 4 類：處理 JSX 的開頭 `<`，會進入 JSX parsing context
+  // push 兩個 context：
+  // - tc.j_expr: 表示這是 JSX 表達式的開頭
+  // - tc.j_oTag: 表示進入 opening tag
+  //
+  // 範例：
+  // const el = <div>{user.name}</div>;
+  //               ↑ JSX 開頭會 push context
   tokenTypes[tt.jsxTagStart].updateContext = context => {
     context.push(tc.j_expr, tc.j_oTag);
   };
