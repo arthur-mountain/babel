@@ -594,10 +594,13 @@ export default abstract class Tokenizer extends CommentsParser {
   }
 
   readToken_slash(): void {
+    // 看下一個 char 是什麼，用來判斷接下來要走哪個分支
     const next = this.input.charCodeAt(this.state.pos + 1);
+    // 如果下一個 char 是 '='，代表是 '/='，會走 finishOp with tt.slashAssign
     if (next === charCodes.equalsTo) {
       this.finishOp(tt.slashAssign, 2);
     } else {
+      // 否則走 finishOp with tt.slash
       this.finishOp(tt.slash, 1);
     }
   }
@@ -1086,8 +1089,11 @@ export default abstract class Tokenizer extends CommentsParser {
   }
 
   finishOp(type: TokenType, size: number): void {
+    // 根據傳進來的 size 和狀態機裡的 this.state.pos 位置，切割出對應的 value
     const str = this.input.slice(this.state.pos, this.state.pos + size);
+    // 更新狀態機的 pos
     this.state.pos += size;
+    // 呼叫 finishToken 方法，將 type 和 value 設定至狀態機中
     this.finishToken(type, str);
   }
 
