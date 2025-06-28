@@ -234,6 +234,8 @@ export default abstract class Tokenizer extends CommentsParser {
     // https://source.chromium.org/chromium/chromium/src/+/master:v8/src/builtins/builtins-string-gen.cc;l=1455;drc=221e331b49dfefadbc6fa40b0c68e6f97606d0b3;bpv=0;bpt=1
     // We reimplement `codePointAt` because `codePointAt` is a V8 builtin which is not inlined by TurboFan (as of M91)
     // since `input` is mostly ASCII, an inlined `charCodeAt` wins here
+    // 
+    // 可以參考 packages/babel-helper-validator-identifier/src/identifier.ts#L115 實作內的註解
     let cp = this.input.charCodeAt(pos);
     if ((cp & 0xfc00) === 0xd800 && ++pos < this.input.length) {
       const trail = this.input.charCodeAt(pos);

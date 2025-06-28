@@ -125,9 +125,11 @@ export function isIdentifierName(name: string): boolean {
     // 若碼點超過 16-bit 的部份（輔助平面），需要用 兩個 16-bit 編碼組合 表示，稱為「代理項對」(surrogate pair)。
     // - 高代理項（High surrogate）範圍：0xD800 ~ 0xDBFF
     // - 低代理項（Low surrogate） 範圍：0xDC00 ~ 0xDFFF
+    //
     // 註解：
-    // 因此透過當前 codepoint 是否為高代理，如果是則繼續往下判斷下一位是否為低代理，如果也是
-    // 要把兩個 codepoint 結合起來，才算組成完整得一個輔助平面的字元
+    // 因此透過當前 codepoint 是否為高代理，如果是則繼續往下判斷下一位是否為低代理，如果是
+    // 就要把兩個 codepoint 結合起來，才算組成完整得一個輔助平面的字元
+    //
     // 註解：
     // 會用 & 0xfc00 的原因是，只需要把(高位 6bit 拿出來比較即可)
     let cp = name.charCodeAt(i);
