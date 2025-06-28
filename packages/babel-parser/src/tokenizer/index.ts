@@ -1098,11 +1098,14 @@ export default abstract class Tokenizer extends CommentsParser {
   }
 
   readRegexp(): void {
+    // 保存起始位置(start)和行號(startLoc)
     const startLoc = this.state.startLoc;
     const start = this.state.start + 1;
+    // flags for 是否包含「跳脫字元」、「在字元類別內」
     let escaped, inClass;
     let { pos } = this.state;
     for (; ; ++pos) {
+      // 超過元字串(source code)長度則報錯
       if (pos >= this.length) {
         // FIXME: explain
         throw this.raise(
@@ -1110,6 +1113,7 @@ export default abstract class Tokenizer extends CommentsParser {
           createPositionWithColumnOffset(startLoc, 1),
         );
       }
+      // 遇到「換行符號」則報錯，正則表達式內不能換行
       const ch = this.input.charCodeAt(pos);
       if (isNewLine(ch)) {
         throw this.raise(
@@ -1117,20 +1121,29 @@ export default abstract class Tokenizer extends CommentsParser {
           createPositionWithColumnOffset(startLoc, 1),
         );
       }
+      // 如果是跳脫字元(backslash)狀態，則將 escaped reset，直接進到下一輪的處理
+      // 因為 ++pos 會隱性的往前走，所以這邊跳過，代表包含當前字元
       if (escaped) {
         escaped = false;
       } else {
+        // 如果是左方括號，則進入字元類別
         if (ch === charCodes.leftSquareBracket) {
           inClass = true;
         } else if (ch === charCodes.rightSquareBracket && inClass) {
+          // 如果是右方括號，且處於 inClass 狀態中，則離開字元類別
           inClass = false;
         } else if (ch === charCodes.slash && !inClass) {
+          // 如果是斜線，且不在字元類別中，則表示正則表達式結束
           break;
         }
+        // 如果是跳脫字元，則將 escaped 設為 true，用來在下一輪表示下一個字元是跳脫字元後的字元
         escaped = ch === charCodes.backslash;
       }
     }
+    // 取出正則表達式的內容，從 start(一開始被保存起來的起始位置) 到 pos(在上述的迴圈處理中，會前進到最後一個 slash char，如果過程中沒錯誤的話)
     const content = this.input.slice(start, pos);
+    
+    // 跳過結尾的 slash 字元
     ++pos;
 
     let mods = "";
