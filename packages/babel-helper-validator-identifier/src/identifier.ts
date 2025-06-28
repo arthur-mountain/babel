@@ -101,6 +101,7 @@ export function isIdentifierChar(code: number): boolean {
   if (code <= charCodes.lowercaseZ) return true;
   // 再判斷 BMP 範圍內是否合法
   if (code <= 0xffff) {
+    // code >= 0xaa 代表非 ASCII 的字元，由於 ASCII 範圍在上面已經判斷，因此這邊如果 code <= 0xaa 代表仍是 ASCII 範圍的字元，則不合法
     return code >= 0xaa && nonASCIIidentifier.test(String.fromCharCode(code));
   }
   // 最後才判斷 Astral 範圍內是否合法

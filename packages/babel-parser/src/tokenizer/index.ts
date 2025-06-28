@@ -470,15 +470,34 @@ export default abstract class Tokenizer extends CommentsParser {
   // the token, so that the next one's `start` will point at the
   // right position.
 
+  // - finishToken 是 tokenizer 的狀態「快照紀錄器」，Babel 每掃完一個 token，不會馬上 return，而是：
+  //   - 記錄這個 token 的 type、value
+  //   - 標記位置（start → end）
+  //   - 提供給 parser 去組 AST
+  // 這樣設計讓 tokenizer 負責 scanning，parser 專注 syntax structure。
+  // 
+  // - prevType 是為了「上下文切換」
+  //   updateContext(prevType) 的設計，是為了處理特殊語法（例如 JSX、template literal...）
+  //   有些 token 的處理需要看前一個 token，例如：
+  //   ```jsx
+  //   <div> ... </div> // JSX
+  //   ```
+  // - isLookahead 保留 tokenizer 可「回溯」的能力（類似 LL(1)/LL(k) parser 的特性）
   finishToken(type: TokenType, val?: any): void {
+    // 1. 更新狀態機的結束位置（end 和 endLoc）
     this.state.end = this.state.pos;
     this.state.endLoc = this.state.curPosition();
-    const prevType = this.state.type;
-    this.state.type = type;
-    this.state.value = val;
 
+    // 2. 保存當前 token type，供上下文切換使用
+    const prevType = this.state.type;
+
+    // 3. 更新狀態機的 token type 和 value
+    this.state.type = type;
+    this.state.value = val; // val 為 token 的值，例如字面量或標識符內容
+
+    // 4. 若非 lookahead 模式，更新上下文（供 JSX 等 plugin override）
     if (!this.isLookahead) {
-      this.updateContext(prevType);
+      this.updateContext(prevType); // 空實作，交由 parser plugin 處理特殊語法
     }
   }
 
