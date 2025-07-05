@@ -49,32 +49,37 @@ export type StringContentsErrorHandlers = EscapedCharErrorHandlers & {
 };
 
 export function readStringContents(
-  type: "single" | "double" | "template",
+  type: "single" | "double" | "template", // 單引號、雙引號、模板字串
   input: string,
   pos: number,
   lineStart: number,
   curLine: number,
   errors: StringContentsErrorHandlers,
 ) {
+  // 儲存起始位置
   const initialPos = pos;
   const initialLineStart = lineStart;
   const initialCurLine = curLine;
 
-  let out = "";
-  let firstInvalidLoc = null;
-  let chunkStart = pos;
+  let out = ""; // 儲存解析後的字串內容
+  let firstInvalidLoc = null; // 儲存第一個無效字元的位置
+  let chunkStart = pos; // 儲存當前字串片段的起始位置
   const { length } = input;
+
   for (;;) {
+    // 超過元字串(原始碼)長度
     if (pos >= length) {
       errors.unterminated(initialPos, initialLineStart, initialCurLine);
       out += input.slice(chunkStart, pos);
       break;
     }
+    // 檢查 ch 是否為字串結尾，則 break 結束
     const ch = input.charCodeAt(pos);
     if (isStringEnd(type, ch, input, pos)) {
       out += input.slice(chunkStart, pos);
       break;
     }
+    // 檢查 ch 是否為「反斜線」，如果是，則讀取轉義字元
     if (ch === charCodes.backslash) {
       out += input.slice(chunkStart, pos);
       const res = readEscapedChar(
@@ -136,13 +141,17 @@ function isStringEnd(
   input: string,
   pos: number,
 ) {
+  // 模板字符串
   if (type === "template") {
     return (
+      /* 如果 ch 是 '`' */ 
       ch === charCodes.graveAccent ||
+      /* 如果 ch 是 '$' 且 下一個 ch 是 '{' */
       (ch === charCodes.dollarSign &&
         input.charCodeAt(pos + 1) === charCodes.leftCurlyBrace)
     );
   }
+    // 如果 ch 是否為「單引號」或「雙引號」
   return (
     ch === (type === "double" ? charCodes.quotationMark : charCodes.apostrophe)
   );
@@ -161,6 +170,7 @@ function readEscapedChar(
   inTemplate: boolean,
   errors: EscapedCharErrorHandlers,
 ) {
+  // 如果非模板字符串，當不合法時需要報錯
   const throwOnInvalid = !inTemplate;
   pos++; // skip '\'
 
@@ -172,6 +182,7 @@ function readEscapedChar(
       return res("\n");
     case charCodes.lowercaseR:
       return res("\r");
+    // 如果 ch 是 'x'，則讀取兩個十六進位字元
     case charCodes.lowercaseX: {
       let code;
       ({ code, pos } = readHexChar(
@@ -332,10 +343,12 @@ export function readInt(
   bailOnError: boolean,
 ) {
   const start = pos;
+  // 根據 radix 的不同，numberic seprator(即「_」) 後方有不同的禁止字元是不被允許的
   const forbiddenSiblings =
     radix === 16
       ? forbiddenNumericSeparatorSiblings.hex
       : forbiddenNumericSeparatorSiblings.decBinOct;
+  // 跟上相反，根據 radix 的不同，numberic seprator(即「_」) 後方有不同的字元是被允許的
   const isAllowedSibling =
     radix === 16
       ? isAllowedNumericSeparatorSibling.hex
@@ -352,6 +365,7 @@ export function readInt(
     const code = input.charCodeAt(pos);
     let val;
 
+    // 當前 ch 是 numberic seprator(即 underscore)，且 allowNumSeparator 不為 "bail"
     if (code === charCodes.underscore && allowNumSeparator !== "bail") {
       const prev = input.charCodeAt(pos - 1);
       const next = input.charCodeAt(pos + 1);
