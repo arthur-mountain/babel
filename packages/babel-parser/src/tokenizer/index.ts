@@ -1107,15 +1107,16 @@ export default abstract class Tokenizer extends CommentsParser {
     for (; ; ++pos) {
       // 超過元字串(source code)長度則報錯
       if (pos >= this.length) {
-        // FIXME: explain
+        // 錯誤處理：未終止的正則表達式，因為超出元字串(source code)範圍
         throw this.raise(
           Errors.UnterminatedRegExp,
           createPositionWithColumnOffset(startLoc, 1),
         );
       }
-      // 遇到「換行符號」則報錯，正則表達式內不能換行
+      // 遇到「換行符號」則報錯
       const ch = this.input.charCodeAt(pos);
       if (isNewLine(ch)) {
+        // 錯誤處理：未終止的正則表達式，因為正則表達式內不能換行
         throw this.raise(
           Errors.UnterminatedRegExp,
           createPositionWithColumnOffset(startLoc, 1),
@@ -1146,42 +1147,61 @@ export default abstract class Tokenizer extends CommentsParser {
     // 跳過結尾的 slash 字元
     ++pos;
 
+    // 儲存 modes (例如： i, g, u , v 等等 flags)
     let mods = "";
 
+    // 當前的 pos(會隨著解析 flags 的同時增加) + 2(扣除結尾的斜線、列偏移定位) - start(起始的斜線位置)，
+    // 用來計算當前 pos 在整個 source code 中的 column offset  
     const nextPos = () =>
       // (pos + 1) + 1 - start
       createPositionWithColumnOffset(startLoc, pos + 2 - start);
 
+    // 如果當前 pos 仍在 source code 字串長度內，則繼續處理後面的 flags
     while (pos < this.length) {
       const cp = this.codePointAtPos(pos);
       // It doesn't matter if cp > 0xffff, the loop will either throw or break because we check on cp
       const char = String.fromCharCode(cp);
 
-      // @ts-expect-error VALID_REGEX_FLAGS.has should accept expanded type: number
+      // 如果是合法的 FLAGS 字元
       if (VALID_REGEX_FLAGS.has(cp)) {
+        // 判斷是否有不得一同使用得 u, v flags
         if (cp === charCodes.lowercaseV) {
           if (mods.includes("u")) {
+            // 錯誤處理：不合法的正則表達式 flags，u, v 不得一同存在，mods 已經包含 u，此時卻遇到 v flags
             this.raise(Errors.IncompatibleRegExpUVFlags, nextPos());
           }
         } else if (cp === charCodes.lowercaseU) {
           if (mods.includes("v")) {
+            // 錯誤處理：不合法的正則表達式 flags，u, v 不得一同存在，mods 已經包含 v，此時卻遇到 u flags
             this.raise(Errors.IncompatibleRegExpUVFlags, nextPos());
           }
         }
+        // 判斷是否有重複得 flags
         if (mods.includes(char)) {
+          // 錯誤處理：不合法的正則表達式 flags，重複得 flags
           this.raise(Errors.DuplicateRegExpFlags, nextPos());
         }
+
+        // 如果 isIdentifierChar 則報錯，如: $, _ 等等是非合法的 flags 字元
+        // 如果遇到 backslash 則報錯，因為目前已經進到解析 flags 階段，不會再有 backslash 字元了
       } else if (isIdentifierChar(cp) || cp === charCodes.backslash) {
+        // 錯誤處理：不合法的正則表達式 不合法的 flags 字元
         this.raise(Errors.MalformedRegExpFlags, nextPos());
       } else {
+        // 上述檢查都沒命中，代表 flags 的解析結束
         break;
       }
 
+      // 如果上述檢查命中了非 else block，同時又沒報錯的話，代表當前字元合法，則將當前字元加入到 mods 中
+      // ++pos 是因為我們已經處理過當前字元了，所以要往前走一個字元
       ++pos;
       mods += char;
     }
+
+    // flags 的解析結束，pos 也已經指向下一個字元，更新狀態機
     this.state.pos = pos;
 
+    // 更新完狀態機，則 finishToken，將正則表達式的內容和 flags 一同傳入
     this.finishToken(tt.regexp, {
       pattern: content,
       flags: mods,
