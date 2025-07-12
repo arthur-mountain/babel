@@ -48,6 +48,30 @@ export type StringContentsErrorHandlers = EscapedCharErrorHandlers & {
   ): void;
 };
 
+/*
+  針對以下回傳的 pos ，稍微記錄一下，
+  
+  在 Babel 的 read* 類解析函式中，回傳的 pos 幾乎一律是指向「下一個要處理的字元」的位置，也就是目前處理完的字元「之後」的位置。
+
+  🔍 為什麼會這樣設計？ 這種設計有幾個好處：
+  
+  1. 符合迭代解析邏輯，解析器會一直向右移動掃描字串，所以：
+     ```ts
+       let { ch, pos } = readSomething(input, pos);
+       下一次呼叫時會直接使用新的 pos 繼續處理下個 token，不需要額外處理偏移：
+     ```
+
+     ```ts
+       readNextThing(input, pos); // 直接從上次結束的地方開始
+     ```
+
+  2. 避免重複處理已解析字元
+     如果回傳的是當前字元的位置，那你下一輪解析時還要自己做 pos + 1，容易漏寫或錯誤。
+  
+  3. 保持語意一致性
+     整個 Babel token parser 都採用這種「游標指向下一個字元」的模式，像指標一樣移動。
+*/
+
 export function readStringContents(
   type: "single" | "double" | "template", // 單引號、雙引號、模板字串
   input: string,                          // 元字串(source code)
@@ -339,36 +363,42 @@ type HexCharErrorHandlers = IntErrorHandlers & {
 
 // Used to read character escape sequences ('\x', '\u').
 function readHexChar(
-  input: string,
-  pos: number,
-  lineStart: number,
-  curLine: number,
-  len: number,
-  forceLen: boolean,
-  throwOnInvalid: boolean,
-  errors: HexCharErrorHandlers,
+  input: string,                // 輸入原始字串
+  pos: number,                  // 當前讀取位置
+  lineStart: number,            // 該行的起始位置
+  curLine: number,              // 當前行號
+  len: number,                  // 要讀幾個十六進位數字（ex: 2 for \x, 4 or variable for \u）
+  forceLen: boolean,            // 是否強制要求固定長度（true 時長度不足就是錯）
+  throwOnInvalid: boolean,      // 遇到錯誤是否要直接拋出錯誤
+  errors: HexCharErrorHandlers, // 錯誤處理器（提供報錯用函式）
 ) {
-  const initialPos = pos;
+  const initialPos = pos; // 記錄原始位置（用來在錯誤時回溯）
+
   let n;
   ({ n, pos } = readInt(
     input,
     pos,
     lineStart,
     curLine,
-    16,
-    len,
-    forceLen,
-    false,
+    16,                                 // 基底為 16（十六進位）
+    len,                                // 要讀取的長度
+    forceLen,                           // 是否一定要滿足長度
+    false,                              // allowSeparators（是否允許數字中有下底線 separator），這邊 false 表示不允許
     errors,
-    /* bailOnError */ !throwOnInvalid,
+    /* bailOnError */ !throwOnInvalid, // 是否在錯誤時停止繼續處理（通常模板字串裡比較寬容）
   ));
+
+  // 如果 n 為 null，表示讀取失敗（可能是長度不足或遇到非法字元）
   if (n === null) {
     if (throwOnInvalid) {
       errors.invalidEscapeSequence(initialPos, lineStart, curLine);
     } else {
+      // 否則回退至初始位置上一格，讓上層 fallback 處理
       pos = initialPos - 1;
     }
   }
+
+  // 回傳結果：解析出的字符*數值*(即 charcode)、當前位置
   return { code: n, pos };
 }
 
@@ -492,47 +522,53 @@ export type CodePointErrorHandlers = HexCharErrorHandlers & {
 };
 
 export function readCodePoint(
-  input: string,
-  pos: number,
-  lineStart: number,
-  curLine: number,
-  throwOnInvalid: boolean,
-  errors: CodePointErrorHandlers,
+  input: string,                  // 要解析的原始輸入字串
+  pos: number,                    // 當前掃描位置
+  lineStart: number,              // 當前行的起始位置
+  curLine: number,                // 當前行號
+  throwOnInvalid: boolean,        // 是否遇錯拋出錯誤
+  errors: CodePointErrorHandlers, // 錯誤處理器（傳入報錯函式）
 ) {
-  const ch = input.charCodeAt(pos);
-  let code;
+  const ch = input.charCodeAt(pos); // 讀當前字元的 charCode（數字表示）
+  let code;                         // 儲存解析出來的 Unicode code point
 
-  if (ch === charCodes.leftCurlyBrace) {
-    ++pos;
+  if (ch === charCodes.leftCurlyBrace) { // 如果是 '{'（處理 \u{XXXX} 格式，動態長度）
+    ++pos; // 跳過左大括號「{」
+
     ({ code, pos } = readHexChar(
       input,
       pos,
       lineStart,
       curLine,
-      input.indexOf("}", pos) - pos,
-      true,
+      input.indexOf("}", pos) - pos, // 動態計算要讀幾個字元（從當前位置直到 '}'）
+      true,                          // 是否要強制指定長度（否則報錯）。 動態長度要強制指定長度
       throwOnInvalid,
       errors,
     ));
-    ++pos;
+
+    ++pos; // 跳過右大括號「}」
+
+    // 檢查 charcode，因為 Unicode 只能到 U+10FFFF，超過就是非法
     if (code !== null && code > 0x10ffff) {
       if (throwOnInvalid) {
-        errors.invalidCodePoint(pos, lineStart, curLine);
+        errors.invalidCodePoint(pos, lineStart, curLine); // 報錯
       } else {
-        return { code: null, pos };
+        return { code: null, pos }; // 不報錯則回傳 null 表示失敗
       }
     }
-  } else {
+  } else {  // 處理傳統的 \uXXXX（4 位固定長度）
     ({ code, pos } = readHexChar(
       input,
       pos,
       lineStart,
       curLine,
-      4,
-      false,
+      4,                // 固定讀 4 位
+      false,            // 不強制固定格式（這裡沒差，因為固定給 4）
       throwOnInvalid,
       errors,
     ));
   }
+
+  // 回傳解析結果：Unicode 整數與位置
   return { code, pos };
 }
