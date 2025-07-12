@@ -1143,7 +1143,7 @@ export default abstract class Tokenizer extends CommentsParser {
     }
     // 取出正則表達式的內容，從 start(一開始被保存起來的起始位置) 到 pos(在上述的迴圈處理中，會前進到最後一個 slash char，如果過程中沒錯誤的話)
     const content = this.input.slice(start, pos);
-    
+
     // 跳過結尾的 slash 字元
     ++pos;
 
@@ -1420,40 +1420,55 @@ export default abstract class Tokenizer extends CommentsParser {
 
   // Reads template string tokens.
   readTemplateToken(): void {
+    // 取得目前的開頭字元：可能是「`」(模板開始)或「}」(表達式結束後回來)
     const opening = this.input[this.state.pos];
+
+    // 使用共用函式讀取 template 字串內容，它會讀到「${」 或「`」為止 (但不包含)
     const { str, firstInvalidLoc, pos, curLine, lineStart } =
       readStringContents(
-        "template",
-        this.input,
-        this.state.pos + 1, // skip '`' or `}`
-        this.state.lineStart,
-        this.state.curLine,
-        this.errorHandlers_readStringContents_template,
+        "template",                                // 字串類型為 template
+        this.input,                                // 原始輸入程式碼
+        this.state.pos + 1,                        // 略過目前的「`」或「}」
+        this.state.lineStart,                      // 行起始位置
+        this.state.curLine,                        // 行號
+        this.errorHandlers_readStringContents_template, // 錯誤處理器
       );
+
+    // 更新狀態機
+    // pos 是當前的狀態機位置，lineStart 是當前行的起始位置，curLine 是當前行號
+    // 更新 tokenizer 狀態位置到目前 template chunk 結尾（pos + 1 是為了跳過 ` 或 $）
     this.state.pos = pos + 1; // skip '`' or `$`
     this.state.lineStart = lineStart;
     this.state.curLine = curLine;
 
+    // 如果有解析錯誤（例如非法的 \u 轉義），記錄第一個錯誤的位置
     if (firstInvalidLoc) {
       this.state.firstInvalidTemplateEscapePos = new Position(
-        firstInvalidLoc.curLine,
-        firstInvalidLoc.pos - firstInvalidLoc.lineStart,
-        this.sourceToOffsetPos(firstInvalidLoc.pos),
+        firstInvalidLoc.curLine,                            // 錯誤發生行
+        firstInvalidLoc.pos - firstInvalidLoc.lineStart,    // 錯誤在該行的列位置
+        this.sourceToOffsetPos(firstInvalidLoc.pos),        // 原始 offset（整體位置）
       );
     }
 
+    // 檢查 pos 所在字元是否為「`」→ 表示這是 template 字串的最後一段（tail）
     if (this.input.codePointAt(pos) === charCodes.graveAccent) {
       this.finishToken(
-        tt.templateTail,
+        tt.templateTail,                              // 最尾段 token
         firstInvalidLoc ? null : opening + str + "`",
       );
     } else {
-      this.state.pos++; // skip '{'
+      // 如果不是「`」結尾 → 表示接下來會有 `${`，此為中間段
+      this.state.pos++; // 略過 「{」
       this.finishToken(
-        tt.templateNonTail,
+        tt.templateNonTail,                            // 中間段 token（templateHead 或 templateMiddle）
         firstInvalidLoc ? null : opening + str + "${",
       );
     }
+
+    // 補充： 為什麼要把 opening 加進 token value？ e.g. 「opening + str + "`"」 或「opening + str + "${"」
+    //   因為 token 的 value 裡包含了 opening （像是 ` 或 }），
+    //   所以 parser 或 tokenizer 可以很快 透過這個 opening 判斷這個 template token 是結尾段還是中間段，
+    //   從而決定「這個 template token 已經完整了」還是「還要繼續往後拼接更多 template token」，
   }
 
   recordStrictModeErrors(toParseError: DeferredStrictError, at: Position) {
@@ -1597,7 +1612,7 @@ export default abstract class Tokenizer extends CommentsParser {
 
   // updateContext is used by the jsx plugin
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  updateContext(prevType: TokenType): void {}
+  updateContext(prevType: TokenType): void { }
 
   // Raise an unexpected token error. Can take the expected token type.
   unexpected(loc?: Position | null, type?: TokenType): void {
