@@ -197,26 +197,30 @@ type EscapedCharErrorHandlers = HexCharErrorHandlers &
   };
 
 function readEscapedChar(
-  input: string,
-  pos: number,
-  lineStart: number,
-  curLine: number,
-  inTemplate: boolean,
-  errors: EscapedCharErrorHandlers,
+  input: string,                    // 輸入的字串，包含轉義字元
+  pos: number,                      // 目前解析的位置（index）
+  lineStart: number,                // 當前行的起始位置（index）
+  curLine: number,                  // 當前行數
+  inTemplate: boolean,              // 是否在模板字串中（template literal）
+  errors: EscapedCharErrorHandlers, // 錯誤處理物件，負責報錯
 ) {
-  // 如果非模板字符串，當不合法時需要報錯
+  // 非模板字串時，遇到非法轉義字元要報錯
   const throwOnInvalid = !inTemplate;
-  pos++; // skip '\'
+
+  pos++; // 跳過 '\'，進入轉義字元的下一個字元
 
   const res = (ch: string | null) => ({ pos, ch, lineStart, curLine });
 
+  // 取得下一個字元的 ASCII code，並把位置往後移
   const ch = input.charCodeAt(pos++);
   switch (ch) {
-    case charCodes.lowercaseN:
+    case charCodes.lowercaseN:  // '\n' 轉換成換行符號
       return res("\n");
-    case charCodes.lowercaseR:
+
+    case charCodes.lowercaseR:  // '\r' 轉換成回車符號
       return res("\r");
-    // 如果 ch 是 'x'，則讀取兩個十六進位字元
+
+    // '\x' 代表讀取兩個十六進位字元，轉成對應的字元
     case charCodes.lowercaseX: {
       let code;
       ({ code, pos } = readHexChar(
@@ -224,13 +228,16 @@ function readEscapedChar(
         pos,
         lineStart,
         curLine,
-        2,
+        2,              // 讀兩個十六進位字元
         false,
         throwOnInvalid,
         errors,
       ));
+      // 如果解析失敗回傳 null，成功就轉換成字元
       return res(code === null ? null : String.fromCharCode(code));
     }
+
+    // '\u' 讀取 Unicode code point (可能是多個字元組成)
     case charCodes.lowercaseU: {
       let code;
       ({ code, pos } = readCodePoint(
@@ -241,54 +248,75 @@ function readEscapedChar(
         throwOnInvalid,
         errors,
       ));
+      // 解析失敗回傳 null，成功轉換成對應字元
       return res(code === null ? null : String.fromCodePoint(code));
     }
-    case charCodes.lowercaseT:
+
+    case charCodes.lowercaseT:  // '\t' 轉成 tab 字元
       return res("\t");
-    case charCodes.lowercaseB:
+    case charCodes.lowercaseB:  // '\b' 退格字元
       return res("\b");
-    case charCodes.lowercaseV:
+    case charCodes.lowercaseV:  // '\v' 垂直制表符
       return res("\u000b");
-    case charCodes.lowercaseF:
+    case charCodes.lowercaseF:  // '\f' 換頁字元
       return res("\f");
-    case charCodes.carriageReturn:
+
+    case charCodes.carriageReturn:  // 遇到回車字元時，如果下一字元是換行，pos 往後多跳一格
       if (input.charCodeAt(pos) === charCodes.lineFeed) {
         ++pos;
       }
     // fall through
-    case charCodes.lineFeed:
+
+    case charCodes.lineFeed:  // 遇到換行字元，更新行起始位置和行數
       lineStart = pos;
       ++curLine;
     // fall through
+
     case charCodes.lineSeparator:
-    case charCodes.paragraphSeparator:
+    case charCodes.paragraphSeparator:  // 這些特殊的換行字元轉換成空字串
       return res("");
+
     case charCodes.digit8:
-    case charCodes.digit9:
+    case charCodes.digit9:  // 八、九不是合法的八進位字元
       if (inTemplate) {
+        // 如果是模板字串中，回傳 null 表示非法轉義
         return res(null);
       } else {
+        // 非模板字串中直接報錯（嚴格模式）
         errors.strictNumericEscape(pos - 1, lineStart, curLine);
       }
     // fall through
+
     default:
+      // 預設情況下，判斷是否是合法的八進位字元（0~7）
       if (ch >= charCodes.digit0 && ch <= charCodes.digit7) {
+        // 取得八進位轉義字串起點
         const startPos = pos - 1;
+
+        // 用正規表達式擷取最多三個八進位字元（0~7）
         const match = /^[0-7]+/.exec(input.slice(startPos, pos + 2));
 
+        // 取出 octal 字串，解析成十進位數值
         let octalStr = match[0];
-
         let octal = parseInt(octalStr, 8);
+
+        // 如果超過 255（超過 byte 範圍），去掉最後一個字元重新解析
         if (octal > 255) {
           octalStr = octalStr.slice(0, -1);
           octal = parseInt(octalStr, 8);
         }
+
+        // 調整位置指標，跳過整個八進位字串長度
         pos += octalStr.length - 1;
+
+        // 取得下一個字元（即 pos 指向的字元）
         const next = input.charCodeAt(pos);
+
+        // 判斷是否有非法八進位後綴
         if (
-          octalStr !== "0" ||
+          octalStr !== "0" ||      // 八進位不是純0
           next === charCodes.digit8 ||
-          next === charCodes.digit9
+          next === charCodes.digit9 // 八進位後面不能接 8 或 9
         ) {
           if (inTemplate) {
             return res(null);
@@ -300,6 +328,7 @@ function readEscapedChar(
         return res(String.fromCharCode(octal));
       }
 
+      // 以上都不符合，直接把字元轉成字串回傳（一般字元）
       return res(String.fromCharCode(ch));
   }
 }
