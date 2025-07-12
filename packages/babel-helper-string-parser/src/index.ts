@@ -424,24 +424,27 @@ export type IntErrorHandlers = {
 };
 
 export function readInt(
-  input: string,
-  pos: number,
-  lineStart: number,
-  curLine: number,
-  radix: number,
-  len: number | undefined,
-  forceLen: boolean,
-  allowNumSeparator: boolean | "bail",
-  errors: IntErrorHandlers,
-  bailOnError: boolean,
+  input: string,                       // 輸入字串
+  pos: number,                         // 當前游標位置
+  lineStart: number,                   // 行起始位置（錯誤定位用）
+  curLine: number,                     // 行號（錯誤定位用）
+  radix: number,                       // 進位（如 16、10、8、2）
+  len: number | undefined,             // 最多讀幾個字元（undefined 代表無限）
+  forceLen: boolean,                   // 若 true，長度不符合時要報錯（例如 \x 要 2 位十六進制的數字）
+  allowNumSeparator: boolean | "bail", // 是否允許 `_` 分隔數字（如 1_000）
+  errors: IntErrorHandlers,            // 錯誤處理 callback（例如 invalidDigit）
+  bailOnError: boolean,                // 出錯是否直接返回（用於模板字串之類容錯場景）
 ) {
+  // 紀錄開始位置，用於檢查是否成功解析任何數字
   const start = pos;
-  // 根據 radix 的不同，numberic seprator(即「_」) 後方有不同的禁止字元是不被允許的
+
+  // 根據 radix 的不同，決定哪些字元不能跟 numeric separator(即「_」) 相鄰
   const forbiddenSiblings =
     radix === 16
       ? forbiddenNumericSeparatorSiblings.hex
       : forbiddenNumericSeparatorSiblings.decBinOct;
-  // 跟上相反，根據 radix 的不同，numberic seprator(即「_」) 後方有不同的字元是被允許的
+
+  // 跟上相反，根據 radix 的不同，哪些字元是被允許作為 numeric separator(即「_」) 後的合法字元
   const isAllowedSibling =
     radix === 16
       ? isAllowedNumericSeparatorSibling.hex
@@ -451,22 +454,26 @@ export function readInt(
           ? isAllowedNumericSeparatorSibling.oct
           : isAllowedNumericSeparatorSibling.bin;
 
-  let invalid = false;
-  let total = 0;
+  let invalid = false; // 用來標記解析過程中是否遇到非法值
+  let total = 0;       // 最後解析出來的整數
 
+  // 主要解析迴圈：每次處理一個字元
   for (let i = 0, e = len == null ? Infinity : len; i < e; ++i) {
+    // 讀當前字元的 charCode
     const code = input.charCodeAt(pos);
     let val;
 
-    // 當前 ch 是 numberic seprator(即 underscore)，且 allowNumSeparator 不為 "bail"
+    // 當前 ch 是 numeric separator(即 underscore)，且 allowNumSeparator 不為 "bail"
     if (code === charCodes.underscore && allowNumSeparator !== "bail") {
       const prev = input.charCodeAt(pos - 1);
       const next = input.charCodeAt(pos + 1);
 
+      // 不允許「_」，直接報錯或中止
       if (!allowNumSeparator) {
         if (bailOnError) return { n: null, pos };
         errors.numericSeparatorInEscapeSequence(pos, lineStart, curLine);
       } else if (
+        // 允許使用「_」，但位置錯誤（前後包含非法字元），仍報錯
         Number.isNaN(next) ||
         !isAllowedSibling(next) ||
         forbiddenSiblings.has(prev) ||
@@ -476,45 +483,102 @@ export function readInt(
         errors.unexpectedNumericSeparator(pos, lineStart, curLine);
       }
 
-      // Ignore this _ character
-      ++pos;
-      continue;
+      ++pos; // 跳過「_」
+      continue; // 不將「_」納入計算
     }
 
-    if (code >= charCodes.lowercaseA) {
+    // 判斷當前字元是否是合法的進位數字，並將其轉換為對應的數值
+    // 這裡的 val 是把字元的 charCode 轉成整數，例如：'0' → 0, 'A' → 10, 'F' → 15
+    /*
+     * 十六進位以上的進位系統（例如 base-16, base-36）會使用字母來表示數字：
+     *   - 'a' 和 'A' 都對應到 10，'f' 對應 15，'z' 對應 35
+     * 
+     * 為了達到這個效果，這裡使用公式：「code - 起始點 + 數值基底」
+     *   - 若 code 是 'a' (97)：
+     *      val = 97 - 97(起始點) + 10(基底數值) = 10
+     *   - 若 code 是 'A' (65)：
+     *      val = 65 - 65(起始點) + 10(基底數值) = 10
+     * 
+     * 這裡的 10 實際上是用 charCodes.lineFeed（即 '\n' 的 Unicode 值，剛好是 10）
+     * 純粹是為了避免直接寫魔術數字 10
+     */
+    if (code >= charCodes.lowercaseA) { // 小寫英文字母 a ~ z
       val = code - charCodes.lowercaseA + charCodes.lineFeed;
-    } else if (code >= charCodes.uppercaseA) {
+    } else if (code >= charCodes.uppercaseA) { // 大寫英文字母 A ~ Z
       val = code - charCodes.uppercaseA + charCodes.lineFeed;
-    } else if (charCodes.isDigit(code)) {
-      val = code - charCodes.digit0; // 0-9
+    } else if (charCodes.isDigit(code)) { // 數字字元 '0' ~ '9'
+      val = code - charCodes.digit0; // 0 ~ 9
     } else {
+      // 非合法字元（非數字或英文字母），例如 '!', '@'，設為 Infinity，代表無效字元，
+      // Infinity 會在下一段 if (val >= radix) 中被偵測，進而判定該字元不是合法數字。
       val = Infinity;
     }
+
+    // 上面解析出真正的數字後，處理超出 radix 的錯誤數字
+    // 例如：如果轉換出來的數值已經超過 radix（如 radix = 16，val > 15），表示該字元 不是合法數字。
     if (val >= radix) {
       // If we found a digit which is too big, errors.invalidDigit can return true to avoid
       // breaking the loop (this is used for error recovery).
       if (val <= 9 && bailOnError) {
+        // 如果是數字 0-9，但超過 radix，且允許 bailOnError，直接返回 null
         return { n: null, pos };
       } else if (
         val <= 9 &&
         errors.invalidDigit(pos, lineStart, curLine, radix)
       ) {
+        // 如果是數字 0-9，但超過 radix，且錯誤處理器回傳 true，則將 val 設為 0（作為一種復原策略）
         val = 0;
       } else if (forceLen) {
+        // 若啟用 forceLen（如 \xXX、\uXXXX），必須讀滿固定長度，即使遇到非法字元也不能跳出；
+        // 這裡設為 0 並標記錯誤(invalid = true)，延後處理錯誤
         val = 0;
         invalid = true;
       } else {
+        // 如果不強制長度，也不容錯，那就停止解析，直接回傳目前累積的數值。
+        // 不往下繼續累積數值
         break;
       }
     }
-    ++pos;
+
+    ++pos; // 移動到下一個字元位置
+
+    // Standard radix-based parsing: shift left (multiply by radix), then add current digit.
+    // For example: "0x1F" → ((0 * 16 + 1) * 16 + 15) = 31
     total = total * radix + val;
-  }
-  if (pos === start || (len != null && pos - start !== len) || invalid) {
-    return { n: null, pos };
+    /*
+      🧠 背後原理：進位制的乘加法解析（乘法展開）
+    
+      這是一種標準的數字解析技巧，用來將字元逐位解析成整數。
+    
+      ✅ 通用公式： total = total * radix + 當前位數值
+    
+      📌 每進一位，就相當於左移一位（乘上一個 radix 的位權），再加上目前解析到的值。
+    
+      以十六進位為例：解析 "0x1F"（= 31）
+    
+      字元順序 | val | total（計算過程）
+      ---------|-----|-------------------
+      '1'      | 1   | total = 0 * 16 + 1 = 1
+      'F'      | 15  | total = 1 * 16 + 15 = 31
+    
+      也適用於二進位、八進位、十進位等任意進位制，例如：
+    
+      - "0b101"（二進位）→ 1×2² + 0×2¹ + 1×2⁰ = 5
+      - "075"（八進位）  → 7×8¹ + 5×8⁰ = 61
+      - "123"（十進位）  → 1×10² + 2×10¹ + 3×10⁰ = 123
+    
+      ❗ 注意：此演算法會受到 radix 與位數影響，數值過大可能導致溢位（但 parser 通常不考慮這點）。
+      
+      ❗ 雖然此處不檢查 overflow，但在某些語言（如 C/C++）中，過大值可能導致錯誤。
+      Babel 這邊僅作 parser，因此允許解析極大整數，後續會由 AST consumer 處理語義層級問題。
+    */
   }
 
-  return { n: total, pos };
+  if (pos === start || (len != null && pos - start !== len) || invalid) {
+    return { n: null, pos }; // 解析失敗
+  }
+
+  return { n: total, pos }; // 回傳成功解析的整數與當前位置
 }
 
 export type CodePointErrorHandlers = HexCharErrorHandlers & {
