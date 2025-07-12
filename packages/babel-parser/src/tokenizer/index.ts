@@ -1401,6 +1401,7 @@ export default abstract class Tokenizer extends CommentsParser {
       this.state.curLine,
       this.errorHandlers_readStringContents_string,
     );
+    // 更新狀態機、FinishToken
     this.state.pos = pos + 1; // skip the quote
     this.state.lineStart = lineStart;
     this.state.curLine = curLine;
